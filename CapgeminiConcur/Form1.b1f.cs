@@ -1,6 +1,7 @@
 ﻿using SAPbouiCOM;
 using SAPbouiCOM.Framework;
 using System;
+using System.Collections.Generic;
 using Application = SAPbouiCOM.Framework.Application;
 
 namespace CapgeminiConcur
@@ -10,7 +11,10 @@ namespace CapgeminiConcur
     {
         private Form oForm;
         private Matrix oMatrixAvansi;
+        private Matrix oMatrixTroskovi;
         private DBDataSource oDBDSAvansi;
+        private DBDataSource oDBDSTroskovi;
+
         private SAPbobsCOM.Company oCompany;
         private bool _recalcGuard = false;
         public Form1()
@@ -28,8 +32,8 @@ namespace CapgeminiConcur
             this.Button0 = ((SAPbouiCOM.Button)(this.GetItem("Item_4").Specific));
             this.Button0.ClickBefore += new SAPbouiCOM._IButtonEvents_ClickBeforeEventHandler(this.Button0_ClickBefore);
             this.Button1 = ((SAPbouiCOM.Button)(this.GetItem("Item_5").Specific));
-            // U OnInitializeComponent:
-            this.Button1.ClickAfter += new SAPbouiCOM._IButtonEvents_ClickAfterEventHandler(this.Button1_ClickAfter);
+            this.Button1.ClickBefore += new SAPbouiCOM._IButtonEvents_ClickBeforeEventHandler(this.Button1_ClickBefore);
+            //  this.Button1.ClickAfter += new SAPbouiCOM._IButtonEvents_ClickAfterEventHandler(this.Button1_ClickAfter);
             this.EditText3 = ((SAPbouiCOM.EditText)(this.GetItem("Item_8").Specific));
             this.EditText8 = ((SAPbouiCOM.EditText)(this.GetItem("Item_13").Specific));
             this.EditText10 = ((SAPbouiCOM.EditText)(this.GetItem("Item_15").Specific));
@@ -52,9 +56,11 @@ namespace CapgeminiConcur
             this.Button2 = ((SAPbouiCOM.Button)(this.GetItem("Item_9").Specific));
             this.Button2.ClickBefore += new SAPbouiCOM._IButtonEvents_ClickBeforeEventHandler(this.Button2_ClickBefore);
             this.Button3 = ((SAPbouiCOM.Button)(this.GetItem("Item_10").Specific));
-
             this.Button3.ClickBefore += new SAPbouiCOM._IButtonEvents_ClickBeforeEventHandler(this.Button3_ClickBefore);
-            //this.Button3.ClickAfter += new SAPbouiCOM._IButtonEvents_ClickAfterEventHandler(this.Button3_ClickAfter);
+            //    this.Button3.ClickAfter += new SAPbouiCOM._IButtonEvents_ClickAfterEventHandler(this.Button3_ClickAfter);
+            this.Button4 = ((SAPbouiCOM.Button)(this.GetItem("1").Specific));
+            this.ComboBox0 = ((SAPbouiCOM.ComboBox)(this.GetItem("Item_50").Specific));
+            this.StaticText3 = ((SAPbouiCOM.StaticText)(this.GetItem("Item_12").Specific));
             this.OnCustomInitialize();
 
         }
@@ -79,8 +85,12 @@ namespace CapgeminiConcur
                 oMatrixAvansi = (Matrix)oForm.Items.Item("Item_18").Specific;
                 oDBDSAvansi = oForm.DataSources.DBDataSources.Item("@BO_CONCUR_CLAIM_OP");
 
-                Matrix0 = (Matrix)oForm.Items.Item("Item_18").Specific;
-                Matrix1 = (Matrix)oForm.Items.Item("Item_43").Specific;
+                oMatrixTroskovi = (Matrix)oForm.Items.Item("Item_43").Specific;
+                oDBDSTroskovi = oForm.DataSources.DBDataSources.Item("@BO_CONCUR_CLAIM_EXP");
+
+                // B1f auto objekti:
+                Matrix0 = oMatrixAvansi;
+                Matrix1 = oMatrixTroskovi;
 
                 oMatrixAvansi.Columns.Item("BrDok").Editable = true;
                 oMatrixAvansi.Columns.Item("Opis").Editable = true;
@@ -88,7 +98,7 @@ namespace CapgeminiConcur
 
                 try
                 {
-                    AddCFLForOutgoingPayments();
+                    AddCFL_OP();
                 }
                 catch (Exception ex)
                 {
@@ -96,6 +106,21 @@ namespace CapgeminiConcur
                         $"Greška pri kreiranju CFL-a: {ex.Message}",
                         BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
                 }
+
+                // Nakon učitavanja forme i svih datasource-a:
+                try
+                {
+                    IzracunajSume();   // odmah proračunaj sume po učitavanju forme
+                }
+                catch (Exception calcEx)
+                {
+                    Application.SBO_Application.StatusBar.SetText(
+                        $"Sume nisu mogle da se izračunaju pri učitavanju forme: {calcEx.Message}",
+                        BoMessageTime.bmt_Short,
+                        BoStatusBarMessageType.smt_Warning
+                    );
+                }
+
             }
             catch (Exception ex)
             {
@@ -104,53 +129,31 @@ namespace CapgeminiConcur
             }
         }
 
-        /// Kreira CFL za Outgoing Payments (OVPM) i vezuje ga za kolonu BrDok
-        private void AddCFLForOutgoingPayments()
+        private void AddCFL_OP()
         {
             try
             {
-                const string cflUID = "CFL_OP";
-                ChooseFromList oCFL = null;
+                ChooseFromListCreationParams p =
+                    (ChooseFromListCreationParams)Application.SBO_Application
+                        .CreateObject(BoCreatableObjectType.cot_ChooseFromListCreationParams);
 
-                // 🔹 Provera da li već postoji CFL
-                try { oCFL = oForm.ChooseFromLists.Item(cflUID); }
-                catch { oCFL = null; }
+                p.ObjectType = "46"; // OT 46 → Outgoing Payments
+                p.UniqueID = "CFL_OP";
+                p.MultiSelection = false;
 
-                if (oCFL == null)
-                {
-                    ChooseFromListCreationParams oCFLCreationParams =
-                        (ChooseFromListCreationParams)Application.SBO_Application.CreateObject(
-                            BoCreatableObjectType.cot_ChooseFromListCreationParams);
+                ChooseFromList oCFL = oForm.ChooseFromLists.Add(p);
 
-                    oCFLCreationParams.MultiSelection = false;
-                    oCFLCreationParams.ObjectType = "46"; // Outgoing Payments
-                    oCFLCreationParams.UniqueID = cflUID;
+                Matrix mtx = (Matrix)oForm.Items.Item("Item_18").Specific;
+                Column col = mtx.Columns.Item("BrDok");
 
-                    oCFL = oForm.ChooseFromLists.Add(oCFLCreationParams);
-
-                    /*Application.SBO_Application.StatusBar.SetText(
-                        "CFL_OP uspešno kreiran.",
-                        BoMessageTime.bmt_Short,
-                        BoStatusBarMessageType.smt_Success);*/
-                }
-
-                // 🔹 Vezivanje CFL-a na kolonu BrDok
-                Column colBrDok = ((Matrix)oForm.Items.Item("Item_18").Specific).Columns.Item("BrDok");
-                colBrDok.ChooseFromListUID = cflUID;
-                colBrDok.ChooseFromListAlias = "DocNum";
-
-                // 🔸 Napomena:
-                // SAP B1 ne dozvoljava direktnu kontrolu prikaza kolona CFL prozora kroz SDK,
-                // pa kolone koje vidiš u “List of Outgoing Payments” određuje sam sistem
-                // na osnovu objekta (OVPM). Ako želiš drugačiji prikaz, mora se kreirati
-                // zaseban custom CFL (user query CFL).
+                col.ChooseFromListUID = "CFL_OP";
+                col.ChooseFromListAlias = "DocNum";
             }
             catch (Exception ex)
             {
                 Application.SBO_Application.StatusBar.SetText(
-                    $"Greška pri kreiranju CFL-a: {ex.Message}",
-                    BoMessageTime.bmt_Short,
-                    BoStatusBarMessageType.smt_Error);
+                    $"Greška pri kreiranju OP CFL: {ex.Message}",
+                    BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
             }
         }
 
@@ -158,216 +161,325 @@ namespace CapgeminiConcur
         {
             BubbleEvent = true;
 
-            // 🔹 Provera da li forma postoji
+            // Forma postoji?
             SAPbouiCOM.Form testForm = null;
-            try
-            {
-                testForm = Application.SBO_Application.Forms.Item(FormUID);
-            }
-            catch
-            {
-                // Forma više ne postoji
-                BubbleEvent = false;
-                return;
-            }
+            try { testForm = Application.SBO_Application.Forms.Item(FormUID); }
+            catch { BubbleEvent = false; return; }
 
-            if (pVal.FormTypeEx != "CapgeminiConcur.Form1") return;
+            if (pVal.FormTypeEx != "CapgeminiConcur.Form1")
+                return;
 
             try
             {
                 oForm = Application.SBO_Application.Forms.Item(FormUID);
-                oDBDSAvansi = oForm.DataSources.DBDataSources.Item("@BO_CONCUR_CLAIM_OP");
 
-                // === 1️⃣ CFL logika za kolonu BrDok ===
-                if (pVal.EventType == BoEventTypes.et_CHOOSE_FROM_LIST &&
-                pVal.ItemUID == "Item_18" && pVal.ColUID == "BrDok")
+                // ============================================================
+                // === CFL – BrDok kolona (Custom Query CFL)                 ===
+                // ============================================================
+                if (pVal.ItemUID == "Item_18" &&
+                    pVal.ColUID == "BrDok" &&
+                    pVal.EventType == BoEventTypes.et_CHOOSE_FROM_LIST)
                 {
+                    if (oMatrixAvansi == null)
+                        oMatrixAvansi = (Matrix)oForm.Items.Item("Item_18").Specific;
+
+                    // === BEFORE ACTION ======================================
                     if (pVal.BeforeAction)
+                    {
+                        string employeeCode = ((EditText)oForm.Items.Item("Item_3").Specific).Value?.Trim();
+                        if (string.IsNullOrEmpty(employeeCode))
+                            return;
+
+                        oCompany = Parametri.m_GetConnected_COMPANY();
+                        var rs = (SAPbobsCOM.Recordset)oCompany.GetBusinessObject(SAPbobsCOM.BoObjectTypes.BoRecordset);
+
+                        // 1️⃣ Preuzmi empID
+                        rs.DoQuery($@"SELECT ""empID"" FROM ""OHEM"" WHERE ""Code"" = '{employeeCode}'");
+                        if (rs.EoF) return;
+
+                        int empID = Convert.ToInt32(rs.Fields.Item("empID").Value);
+
+                        // 2️⃣ Preuzmi sve OP za zaposlenog
+                        rs.DoQuery($@"
+                            SELECT DISTINCT T0.""DocEntry"", T0.""DocNum""
+                            FROM ""OVPM"" T0
+                            INNER JOIN ""VPM4"" T1 ON T0.""DocEntry"" = T1.""DocNum""
+                            WHERE T0.""DocType"" = 'A'
+                            AND T1.""U_EMPLOYEE"" = {empID}
+                        ");
+
+                        if (rs.RecordCount == 0)
+                        {
+                            Application.SBO_Application.MessageBox("Nema OP dokumenata za ovog zaposlenog.");
+                            BubbleEvent = false;
+                            return;
+                        }
+
+                        // ==============================================
+                        // 🔥 3️⃣ Uklanjamo OP-ove koji su već u matrici
+                        // ==============================================
+                        List<string> allowed = new List<string>();
+
+                        while (!rs.EoF)
+                        {
+                            string entry = rs.Fields.Item("DocEntry").Value.ToString();
+                            string number = rs.Fields.Item("DocNum").Value.ToString();
+
+                            bool alreadyUsed = false;
+
+                            for (int i = 1; i <= oMatrixAvansi.RowCount; i++)
+                            {
+                                string existing =
+                                    ((EditText)oMatrixAvansi.Columns.Item("BrDok")
+                                        .Cells.Item(i).Specific).Value?.Trim();
+
+                                if (existing == number)
+                                {
+                                    alreadyUsed = true;
+                                    break;
+                                }
+                            }
+
+                            if (!alreadyUsed)
+                                allowed.Add(entry);
+
+                            rs.MoveNext();
+                        }
+
+                        // 4️⃣ Ako nema više OP-ova — nema CFL
+                        if (allowed.Count == 0)
+                        {
+                            Application.SBO_Application.StatusBar.SetText(
+                                "Svi OP dokumenti zaposlenog su već iskorišćeni.",
+                                BoMessageTime.bmt_Short,
+                                BoStatusBarMessageType.smt_Warning
+                            );
+
+                            BubbleEvent = false;
+                            return;
+                        }
+
+                        // 5️⃣ Postavi Conditions samo za preostale OP-ove
+                        ChooseFromList oCFL = oForm.ChooseFromLists.Item("CFL_OP");
+                        Conditions conds = (Conditions)Application.SBO_Application.CreateObject(BoCreatableObjectType.cot_Conditions);
+
+                        for (int i = 0; i < allowed.Count; i++)
+                        {
+                            Condition c = conds.Add();
+                            c.Alias = "DocEntry";
+                            c.Operation = BoConditionOperation.co_EQUAL;
+                            c.CondVal = allowed[i];
+
+                            if (i < allowed.Count - 1)
+                                c.Relationship = BoConditionRelationship.cr_OR;
+                        }
+
+                        oCFL.SetConditions(conds);
+                    }
+
+                    else // AFTER ACTION
                     {
                         try
                         {
-                            string employeeCode = ((EditText)oForm.Items.Item("Item_3").Specific).Value;
-                            if (string.IsNullOrEmpty(employeeCode))
+                            IChooseFromListEvent ev = (IChooseFromListEvent)pVal;
+                            DataTable dt = ev.SelectedObjects;
+
+                            if (dt == null || dt.Rows.Count == 0)
+                                return;
+
+                            int row = pVal.Row;
+                            oMatrixAvansi.FlushToDataSource();
+
+                            string docNum = dt.GetValue("DocNum", 0).ToString();
+
+                            // === 1️⃣ Uzmi trenutni ReportID ===
+                            string reportID = ((EditText)oForm.Items.Item("Item_1").Specific).Value?.Trim();
+
+                            // === 2️⃣ Proveri OP u OVPM ===
+                            SAPbobsCOM.Recordset rsCheck =
+                                (SAPbobsCOM.Recordset)oCompany.GetBusinessObject(SAPbobsCOM.BoObjectTypes.BoRecordset);
+
+                            rsCheck.DoQuery($@"
+                                SELECT ""DocEntry"", ""U_REPORTID""
+                                FROM ""OVPM""
+                                WHERE ""DocNum"" = '{docNum}'
+                            ");
+
+                            if (rsCheck.EoF)
                             {
                                 Application.SBO_Application.StatusBar.SetText(
-                                    "EmployeeCode nije unet – ne može se filtrirati lista.",
-                                    BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Warning);
+                                    $"OP dokument {docNum} nije pronađen.",
+                                    BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
                                 return;
                             }
 
-                            oCompany = Parametri.m_GetConnected_COMPANY();
-                            SAPbobsCOM.Recordset oRec = (SAPbobsCOM.Recordset)oCompany.GetBusinessObject(SAPbobsCOM.BoObjectTypes.BoRecordset);
-                            SAPbobsCOM.Recordset oDocs = (SAPbobsCOM.Recordset)oCompany.GetBusinessObject(SAPbobsCOM.BoObjectTypes.BoRecordset);
+                            int docEntry = Convert.ToInt32(rsCheck.Fields.Item("DocEntry").Value);
+                            string existingRepID = rsCheck.Fields.Item("U_REPORTID").Value.ToString().Trim();
 
-                            try
+                            // === 3️⃣ Ako je OP već korišćen u drugom obračunu → stop ===
+                            if (!string.IsNullOrEmpty(existingRepID) && existingRepID != reportID)
                             {
-                                // 1️⃣ Nađi empID
-                                oRec.DoQuery($@"SELECT ""empID"" FROM ""OHEM"" WHERE ""Code"" = '{employeeCode}'");
-                                if (oRec.EoF)
+                                Application.SBO_Application.MessageBox(
+                                    $"Avans (OP {docNum}) je već iskorišćen!\n" +
+                                    $"ReportID: {existingRepID}"
+                                );
+                                return;
+                            }
+
+                            // === 4️⃣ Ako nije korišćen – upiši trenutni ReportID ===
+                            if (string.IsNullOrEmpty(existingRepID))
+                            {
+                                SAPbobsCOM.Payments pay =
+                                    (SAPbobsCOM.Payments)oCompany.GetBusinessObject(SAPbobsCOM.BoObjectTypes.oIncomingPayments);
+
+                                if (!pay.GetByKey(docEntry))
                                 {
-                                    Application.SBO_Application.StatusBar.SetText($"Nepostojeći zaposleni sa Code = {employeeCode}",
-                                        BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Warning);
-                                    return;
+                                    pay = (SAPbobsCOM.Payments)oCompany.GetBusinessObject(SAPbobsCOM.BoObjectTypes.oVendorPayments);
+                                    pay.GetByKey(docEntry);
                                 }
 
-                                int employeeID = Convert.ToInt32(oRec.Fields.Item("empID").Value);
+                                pay.UserFields.Fields.Item("U_REPORTID").Value = reportID;
+                                int ret = pay.Update();
 
-                                // 2️⃣ Nađi sve OP dokumente tipa Account vezane za tog zaposlenog
-                                string query = $@"
-                                SELECT DISTINCT T0.""DocNum""
+                                if (ret != 0)
+                                {
+                                    oCompany.GetLastError(out int errCode, out string errMsg);
+                                    Application.SBO_Application.StatusBar.SetText(
+                                        $"Greška pri upisu ReportID u OP {docNum}: {errMsg}",
+                                        BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error
+                                    );
+                                    return;
+                                }
+                            }
+
+                            // === 5️⃣ Nastavi normalno: upis memo + total u UDO ===
+
+                            SAPbobsCOM.Recordset rs =
+                                (SAPbobsCOM.Recordset)oCompany.GetBusinessObject(SAPbobsCOM.BoObjectTypes.BoRecordset);
+
+                            rs.DoQuery($@"
+                                SELECT 
+                                    T0.""Comments"",
+                                    T0.""DocTotal""
                                 FROM ""OVPM"" T0
-                                INNER JOIN ""VPM4"" T1 ON T0.""DocEntry"" = T1.""DocNum""
-                                WHERE T0.""DocType"" = 'A' 
-                                AND T1.""U_EMPLOYEE"" = {employeeID}";                
+                                WHERE T0.""DocNum"" = '{docNum}'
+                            ");
 
-                                oDocs.DoQuery(query);
+                            string memo = rs.Fields.Item("Comments").Value.ToString();
+                            string total = rs.Fields.Item("DocTotal").Value.ToString();
 
-                                if (oDocs.EoF)
+                            // Duplicate check
+                            for (int i = 1; i <= oMatrixAvansi.RowCount; i++)
+                            {
+                                string existing =
+                                    ((EditText)oMatrixAvansi.Columns.Item("BrDok").Cells.Item(i).Specific).Value;
+
+                                if (existing == docNum && i != row)
                                 {
                                     Application.SBO_Application.StatusBar.SetText(
-                                        "Nema Account plaćanja za ovog zaposlenog.",
+                                        $"Dokument {docNum} je već dodat u redu {i}.",
                                         BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Warning);
                                     return;
                                 }
-
-                                // 3️⃣ Kreiraj uslov za sve pronađene DocNum vrednosti
-                                ChooseFromList oCFL = oForm.ChooseFromLists.Item("CFL_OP");
-                                Conditions oConds = new Conditions();
-
-                                bool first = true;
-                                while (!oDocs.EoF)
-                                {
-                                    string docNum = oDocs.Fields.Item("DocNum").Value.ToString();
-                                    Condition cond = oConds.Add();
-                                    cond.Alias = "DocNum";
-                                    cond.Operation = BoConditionOperation.co_EQUAL;
-                                    cond.CondVal = docNum;
-
-                                    if (!first)
-                                        cond.Relationship = BoConditionRelationship.cr_OR;
-                                    first = false;
-
-                                    oDocs.MoveNext();
-                                }
-
-                                oCFL.SetConditions(oConds);
-
-                                Application.SBO_Application.StatusBar.SetText(
-                                    $"CFL filtriran – prikazuje samo OP tipa Account za empID={employeeID}",
-                                    BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Success);
                             }
-                            finally
-                            {
-                                try { System.Runtime.InteropServices.Marshal.ReleaseComObject(oRec); } catch { }
-                                try { System.Runtime.InteropServices.Marshal.ReleaseComObject(oDocs); } catch { }
-                            }
+
+                            // Upis u UDO
+                            oDBDSAvansi.SetValue("U_BrojDokumenta", row - 1, docNum);
+                            oDBDSAvansi.SetValue("U_Opis", row - 1, memo);
+                            oDBDSAvansi.SetValue("U_Iznos", row - 1, total);
+
+                            oMatrixAvansi.LoadFromDataSource();
+                            IzracunajSume();
                         }
                         catch (Exception ex)
                         {
                             Application.SBO_Application.StatusBar.SetText(
-                                $"Greška pri filtriranju CFL-a: {ex.Message}",
+                                $"Greška u CFL AfterAction: {ex.Message}",
                                 BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
                         }
                     }
-                    else
-                    {
-                        try
-                        {
-                            IChooseFromListEvent cflEvent = (IChooseFromListEvent)pVal;
-                            DataTable dt = cflEvent.SelectedObjects;
-
-                            if (dt != null && dt.Rows.Count > 0)
-                            {
-                                int row = pVal.Row;
-                                oMatrixAvansi.FlushToDataSource();
-
-                                // 🔹 Čitanje vrednosti iz izabranog reda
-                                string docNum = dt.GetValue("DocNum", 0).ToString();
-
-                                // 🔍 Proveri da li je isti avans već izabran u drugom redu
-                                for (int i = 1; i <= oMatrixAvansi.RowCount; i++)
-                                {
-                                    string existing = ((EditText)oMatrixAvansi.Columns.Item("BrDok").Cells.Item(i).Specific).Value;
-                                    if (!string.IsNullOrEmpty(existing) && existing == docNum && i != row)
-                                    {
-                                        Application.SBO_Application.StatusBar.SetText(
-                                            $"Avans {docNum} je već odabran u redu {i}.",
-                                            BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Warning);
-                                        return;
-                                    }
-                                }
-
-                                string opis = dt.GetValue("JrnlMemo", 0).ToString();
-                                string amount = dt.GetValue("DocTotal", 0).ToString();
-
-                                // 🔹 Upis u data source (UDO liniju)
-                                oDBDSAvansi.SetValue("U_BrojDokumenta", row - 1, docNum);
-                                oDBDSAvansi.SetValue("U_Opis", row - 1, opis);
-                                oDBDSAvansi.SetValue("U_Iznos", row - 1, amount);
-
-                                oMatrixAvansi.LoadFromDataSource();
-
-                                // 🔹 Ponovno izračunavanje suma
-                                IzracunajSume();
-
-                                Application.SBO_Application.StatusBar.SetText(
-                                    $"Odabran dokument: {docNum} | {opis} | {amount}",
-                                    BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Success);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Application.SBO_Application.StatusBar.SetText(
-                                $"Greška pri obradi izbora iz CFL-a: {ex.Message}",
-                                BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
-                        }
-                    }
-
 
                 }
 
-
-                // === 2 Kad se učitaju podaci iz UDO-a ===
-                if (pVal.EventType == BoEventTypes.et_FORM_DATA_LOAD && !pVal.BeforeAction)
+                // ============================================================
+                // === 2️⃣ ZAMENA za FORM_DATA_LOAD → DETEKCIJA SAP DUGMADI ===
+                // ============================================================
+                // Ovo radi ZA SVAKI LOAD, NEXT, PREV, FIND, UPDATE, ADD
+                if (
+                    (
+                        pVal.ItemUID == "1" ||   // OK / Add / Update / Find
+                        pVal.ItemUID == "1281" ||   // Find
+                        pVal.ItemUID == "1282" ||   // Add
+                        pVal.ItemUID == "1288" ||   // First
+                        pVal.ItemUID == "1289" ||   // Last
+                        pVal.ItemUID == "1290" ||   // Next
+                        pVal.ItemUID == "1291"       // Previous
+                    )
+                    &&
+                    (
+                        pVal.EventType == BoEventTypes.et_ITEM_PRESSED ||
+                        pVal.EventType == BoEventTypes.et_CLICK
+                    )
+                    &&
+                    !pVal.BeforeAction
+                    )
                 {
                     try
                     {
-                        // Dohvati ime i prezime iz glavnog UDO objekta
-                        DBDataSource dsHeader = oForm.DataSources.DBDataSources.Item("@BO_CONCUR_CLAIM");
-                        string ime = dsHeader.GetValue("U_EmployeeName", 0).Trim();
-                        string prezime = dsHeader.GetValue("U_EmployeeLastName", 0).Trim();
+                        DBDataSource dsHeader = oForm.DataSources.DBDataSources.Item("@BO_CONCUR_CLAIM_H");
+                        string zatvoreno = dsHeader.GetValue("U_Zatvoreno", 0).Trim();
 
-                        if (!string.IsNullOrEmpty(ime))
-                        {
-                            EditText imePrezime = (EditText)oForm.Items.Item("Item_3").Specific;
-                            imePrezime.Value = ime;
+                        // Sync ComboBox
+                        if (zatvoreno == "Y")
+                            ComboBox0.Select("Y", BoSearchKey.psk_ByValue);
+                        else
+                            ComboBox0.Select("N", BoSearchKey.psk_ByValue);
 
-                            if (!string.IsNullOrEmpty(prezime) && !imePrezime.Value.Contains(prezime))
-                                imePrezime.Value += " " + prezime;
-                        }
+                        // Zaključaj formu ako treba
+                        if (zatvoreno == "Y")
+                            DisableEditing();
+                        else
+                            EnableEditing();
 
-                        // Računanje suma odmah nakon učitavanja
+                        // Reload matrica
+                        oMatrixAvansi.LoadFromDataSource();
+                        oMatrixTroskovi.LoadFromDataSource();
+
                         IzracunajSume();
                     }
                     catch (Exception ex)
                     {
                         Application.SBO_Application.StatusBar.SetText(
-                            $"Greška pri učitavanju imena/prezimena ili računanju suma: {ex.Message}",
+                            "Greška pri reloadu (SAP dugmad): " + ex.Message,
                             BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
                     }
                 }
 
-                // === 3 Kad se promeni iznos u bilo kojoj matrici (AFTER) ===
+                // ============================================================
+                // === 3️⃣ Recalc suma                                         ===
+                // ============================================================
                 if (!pVal.BeforeAction &&
-                    (pVal.EventType == BoEventTypes.et_VALIDATE || pVal.EventType == BoEventTypes.et_LOST_FOCUS))
+                    (pVal.EventType == BoEventTypes.et_VALIDATE ||
+                     pVal.EventType == BoEventTypes.et_LOST_FOCUS))
                 {
-                    bool kolonaIznosAvans = pVal.ItemUID == "Item_18" && pVal.ColUID == "Iznos";
-                    bool kolonaIznosTrosak = pVal.ItemUID == "Item_43" && pVal.ColUID == "Iznos1";
-
-                    if (kolonaIznosAvans || kolonaIznosTrosak)
+                    if ((pVal.ItemUID == "Item_18" && pVal.ColUID == "Iznos") ||
+                        (pVal.ItemUID == "Item_43" && pVal.ColUID == "Iznos1"))
                     {
                         IzracunajSume();
                     }
+                }
+                // === Univerzalni detektor promene UDO rekorda ===
+                // Radi i za Next, Previous, Find, OK i sve ostalo
+                if (pVal.EventType == BoEventTypes.et_FORM_ACTIVATE && !pVal.BeforeAction)
+                {
+                    try
+                    {
+                        // Kada pređeš na novi zapis — refresuj sve
+                        oMatrixAvansi.LoadFromDataSource();
+                        oMatrixTroskovi.LoadFromDataSource();
+                        IzracunajSume();
+                    }
+                    catch { }
                 }
             }
             catch (Exception ex)
@@ -375,6 +487,99 @@ namespace CapgeminiConcur
                 Application.SBO_Application.StatusBar.SetText(
                     $"Greška u ItemEvent: {ex.Message}",
                     BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
+            }
+        }
+
+        private void DisableEditing()
+        {
+            try
+            {
+                oForm.Freeze(true);
+
+                foreach (Item item in oForm.Items)
+                {
+                    string uid = item.UniqueID;
+
+                    // --- SAP sistemska dugmad — ne diramo ---
+                    bool isSystemButton =
+                        uid == "1" ||   // OK / Update / Add / Find
+                        uid == "2" ||   // Cancel SAP
+                        uid == "1281" || // Find
+                        uid == "1282" || // Add
+                        uid == "1288" || uid == "1289" || // First / Last
+                        uid == "1290" || uid == "1291";   // Next / Previous
+
+                    // --- Tabovi moraju ostati uključeni ---
+                    if (item.Type == BoFormItemTypes.it_FOLDER)
+                        continue;
+
+                    // --- Tvoje Cancel dugme (Item_5) ostaje aktivno ---
+                    if (uid == "Item_5")
+                        continue;
+
+                    // --- ComboBox za zaključavanje (Item_50) mora ostati aktivan ---
+                    if (uid == "Item_50")
+                        continue;
+
+                    // --- Sve ostalo se disabluje ---
+                    if (!isSystemButton)
+                        item.Enabled = false;
+                }
+
+                // Matrice — kolone ne smeju biti editable
+                oMatrixAvansi.Columns.Item("BrDok").Editable = false;
+                oMatrixAvansi.Columns.Item("Opis").Editable = false;
+                oMatrixAvansi.Columns.Item("Iznos").Editable = false;
+
+                oMatrixTroskovi.Columns.Item("Opis1").Editable = false;
+                oMatrixTroskovi.Columns.Item("Iznos1").Editable = false;
+
+                Application.SBO_Application.StatusBar.SetText(
+                    "Dokument je zaključan za izmene.",
+                    BoMessageTime.bmt_Short,
+                    BoStatusBarMessageType.smt_Warning);
+            }
+            catch { }
+            finally
+            {
+                try { oForm.Freeze(false); } catch { }
+            }
+        }
+
+        private void EnableEditing()
+        {
+            try
+            {
+                oForm.Freeze(true);
+
+                foreach (Item item in oForm.Items)
+                {
+                    string uid = item.UniqueID;
+
+                    // Cancel dugme ostaje enabled
+                    if (uid == "Item_5")
+                        continue;
+
+                    // Tabovi su uvek allowed
+                    if (item.Type == BoFormItemTypes.it_FOLDER)
+                        continue;
+
+                    // Sve ostalo se ponovo uključuje
+                    item.Enabled = true;
+                }
+
+                // Matrice — opet editable
+                oMatrixAvansi.Columns.Item("BrDok").Editable = true;
+                oMatrixAvansi.Columns.Item("Opis").Editable = true;
+                oMatrixAvansi.Columns.Item("Iznos").Editable = true;
+
+                oMatrixTroskovi.Columns.Item("Opis1").Editable = true;
+                oMatrixTroskovi.Columns.Item("Iznos1").Editable = true;
+            }
+            catch { }
+            finally
+            {
+                try { oForm.Freeze(false); } catch { }
             }
         }
 
@@ -390,41 +595,66 @@ namespace CapgeminiConcur
                 double sumaAvansa = 0.0;
                 double sumaTroskova = 0.0;
 
-                // --- Matrix za Avanse (Item_18, kolona "Iznos") ---
-                for (int i = 1; i <= Matrix0.RowCount; i++)
+                // === 1️⃣ Provera da li matrix avansa ima ijednu validnu stavku ===
+                bool imaValidnihAvansa = false;
+
+                for (int i = 1; i <= oMatrixAvansi.RowCount; i++)
                 {
-                    var cell = (SAPbouiCOM.EditText)Matrix0.Columns.Item("Iznos").Cells.Item(i).Specific;
-                    string val = cell?.Value?.Trim() ?? "";
-                    if (double.TryParse(val, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double iznos) ||
-                        double.TryParse(val, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.CurrentCulture, out iznos))
+                    var cellBrDok = (SAPbouiCOM.EditText)oMatrixAvansi.Columns.Item("BrDok").Cells.Item(i).Specific;
+                    string br = cellBrDok?.Value?.Trim() ?? "";
+
+                    if (!string.IsNullOrEmpty(br))      // ako postoji ijedan popunjen avans
                     {
-                        sumaAvansa += iznos;
+                        imaValidnihAvansa = true;
+                        break;
                     }
                 }
 
-                // --- Matrix za Troškove (Item_43, kolona "Iznos1") ---
-                for (int i = 1; i <= Matrix1.RowCount; i++)
+                // === 2️⃣ Ako nema validnih avansa → sumaAvansa ostaje 0.00 ===
+                if (imaValidnihAvansa)
                 {
-                    var cell = (SAPbouiCOM.EditText)Matrix1.Columns.Item("Iznos1").Cells.Item(i).Specific;
+                    // Saberi samo iznose iz popunjenih avansa
+                    for (int i = 1; i <= oMatrixAvansi.RowCount; i++)
+                    {
+                        var cellIznos = (SAPbouiCOM.EditText)oMatrixAvansi.Columns.Item("Iznos").Cells.Item(i).Specific;
+                        string val = cellIznos?.Value?.Trim() ?? "";
+
+                        if (double.TryParse(val, System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.InvariantCulture, out double iznos)
+                            || double.TryParse(val, System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.CurrentCulture, out iznos))
+                        {
+                            sumaAvansa += iznos;
+                        }
+                    }
+                }
+                else
+                {
+                    sumaAvansa = 0.00;
+                }
+
+                // === 3️⃣ Matrix za TROŠKOVE (uvek se sabiraju odmah) ===
+                for (int i = 1; i <= oMatrixTroskovi.RowCount; i++)
+                {
+                    var cell = (SAPbouiCOM.EditText)oMatrixTroskovi.Columns.Item("Iznos1").Cells.Item(i).Specific;
                     string val = cell?.Value?.Trim() ?? "";
-                    if (double.TryParse(val, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double iznos) ||
-                        double.TryParse(val, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.CurrentCulture, out iznos))
+
+                    if (double.TryParse(val, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out double iznos)
+                        || double.TryParse(val, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.CurrentCulture, out iznos))
                     {
                         sumaTroskova += iznos;
                     }
                 }
 
+                // === 4️⃣ Izračunaj razliku ===
                 double razlika = sumaAvansa - sumaTroskova;
 
-                // --- Upis vrednosti u polja na formi (Item_36, Item_37, Item_38) ---
-                // Ovo je bezbedno jer su to EditText polja (Amount), a ne forsira se DB update forme.
-                EditText13.Value = sumaAvansa.ToString("F2", System.Globalization.CultureInfo.InvariantCulture); // Item_36 – Suma avansa
-                EditText14.Value = sumaTroskova.ToString("F2", System.Globalization.CultureInfo.InvariantCulture); // Item_37 – Suma troškova
-                EditText15.Value = razlika.ToString("F2", System.Globalization.CultureInfo.InvariantCulture); // Item_38 – Razlika
-
-                // --- (VAŽNO) NE raditi oForm.Update() ovde ---
-                // Ako želiš da sume budu i u UDO headeru, odradi to na Save/OK događaju ili eksplicitnom dugmetu.
-                // U suprotnom rizikuješ pad SAP-a tokom edit Validate faze.
+                // === 5️⃣ Upis u polja (bez DB update-a) ===
+                EditText13.Value = sumaAvansa.ToString("F2", System.Globalization.CultureInfo.InvariantCulture); // suma avansa
+                EditText14.Value = sumaTroskova.ToString("F2", System.Globalization.CultureInfo.InvariantCulture); // suma troskova
+                EditText15.Value = razlika.ToString("F2", System.Globalization.CultureInfo.InvariantCulture); // razlika
             }
             catch (Exception ex)
             {
@@ -438,8 +668,6 @@ namespace CapgeminiConcur
                 _recalcGuard = false;
             }
         }
-
-
 
         private SAPbouiCOM.EditText EditText0;
         private SAPbouiCOM.EditText EditText1;
@@ -506,7 +734,19 @@ namespace CapgeminiConcur
                 oForm.Freeze(false);
             }*/
 
-            BubbleEvent = true; oMatrixAvansi.AddRow();
+            string zatvoreno = oForm.DataSources.DBDataSources
+            .Item("@BO_CONCUR_CLAIM_H")
+            .GetValue("U_Zatvoreno", 0).Trim();
+
+            if (zatvoreno == "Y")
+            {
+                Application.SBO_Application.MessageBox("Dokument je zaključan. Nije dozvoljeno menjanje redova.");
+                BubbleEvent = false;
+                return;
+            }
+
+            BubbleEvent = true; 
+            oMatrixAvansi.AddRow();
             oMatrixAvansi.ClearRowData(oMatrixAvansi.VisualRowCount);
             oMatrixAvansi.FlushToDataSource();
             oMatrixAvansi.LoadFromDataSource();
@@ -564,8 +804,6 @@ namespace CapgeminiConcur
             }
         }
 
-
-
         private void Button3_ClickBefore(object sboObject, SBOItemEventArg pVal, out bool BubbleEvent)
         {
             BubbleEvent = true;
@@ -573,6 +811,17 @@ namespace CapgeminiConcur
             try
             {
                 oForm.Freeze(true);
+
+                string zatvoreno = oForm.DataSources.DBDataSources
+                .Item("@BO_CONCUR_CLAIM_H")
+                .GetValue("U_Zatvoreno", 0).Trim();
+
+                if (zatvoreno == "Y")
+                {
+                    Application.SBO_Application.MessageBox("Dokument je zaključan. Nije dozvoljeno menjanje redova.");
+                    BubbleEvent = false;
+                    return;
+                }
 
                 CellPosition cell = oMatrixAvansi.GetCellFocus();
                 if (cell.rowIndex <= 0)
@@ -606,15 +855,6 @@ namespace CapgeminiConcur
             {
                 oForm.Freeze(false);
             }
-
-            /*BubbleEvent = true;
-            CellPosition cell = oMatrixAvansi.GetCellFocus();
-            if (cell.rowIndex > 0)
-            {
-                oMatrixAvansi.DeleteRow(cell.rowIndex);
-                oMatrixAvansi.FlushToDataSource();
-                oMatrixAvansi.LoadFromDataSource();
-            }*/
         }
 
         private void Button3_ClickAfter(object sboObject, SBOItemEventArg pVal)
@@ -679,29 +919,20 @@ namespace CapgeminiConcur
 
         private void Button1_ClickBefore(object sboObject, SBOItemEventArg pVal, out bool BubbleEvent)
         {
-            BubbleEvent = true; // Set BubbleEvent to true to allow the event to continue
+            BubbleEvent = false;      // SPREČAVA SAP da uradi svoje otkazivanje
 
-            // Close the current form
-            Application.SBO_Application.Forms.ActiveForm.Close();
-        }
-
-        private void Button1_ClickAfter(object sboObject, SBOItemEventArg pVal)
-        {
             try
             {
-                if (Application.SBO_Application.Forms.ActiveForm != null)
-                {
-                    Application.SBO_Application.Forms.ActiveForm.Close();
-                }
+                oForm.Close();        // Ručno zatvaranje forme
             }
             catch (Exception ex)
             {
                 Application.SBO_Application.StatusBar.SetText(
-                    $"Greška pri zatvaranju forme: {ex.Message}",
-                    BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
+                    $"Greška: {ex.Message}",
+                    BoMessageTime.bmt_Short,
+                    BoStatusBarMessageType.smt_Error);
             }
         }
-
 
         private void Button0_ClickBefore(object sboObject, SBOItemEventArg pVal, out bool BubbleEvent)
         {
@@ -737,7 +968,7 @@ namespace CapgeminiConcur
         }
 
 
-        public void CreatePayDIAPI(ref SAPbobsCOM.Company oCompany, ref SAPbouiCOM.Form oForm, out string sErr, out int iErr)
+        /*public void CreatePayDIAPI(ref SAPbobsCOM.Company oCompany, ref SAPbouiCOM.Form oForm, out string sErr, out int iErr)
         {
             iErr = 0;
             sErr = "";
@@ -749,7 +980,8 @@ namespace CapgeminiConcur
                 double sumaTroskova = double.Parse(((EditText)oForm.Items.Item("Item_37").Specific).Value);
                 double razlika = double.Parse(((EditText)oForm.Items.Item("Item_38").Specific).Value);
                 string empCode = ((EditText)oForm.Items.Item("Item_3").Specific).Value; // Code iz OHEM
-                string valuta = "RSD";
+                string repId = ((EditText)oForm.Items.Item("Item_1").Specific).Value; //RepID iz Header-a
+                string valuta = ((EditText)oForm.Items.Item("Item_15").Specific).Value;
                 DateTime datum = DateTime.Now;
 
                 if (Math.Abs(razlika) < 0.01)
@@ -798,6 +1030,11 @@ namespace CapgeminiConcur
                 oPayment.Remarks = isIncoming
                     ? "Uplata zaposlenog po obračunu troškova (Concur Claim)"
                     : "Isplata zaposlenom po obračunu troškova (Concur Claim)";
+
+
+                // 🔹 4️⃣ Dodavanje ReportID u zaglavlje OVPM dokumenta
+                if (!string.IsNullOrEmpty(repId))
+                    oPayment.UserFields.Fields.Item("U_REPORTID").Value = repId;
 
                 // 🔹 4️⃣ Dodavanje reda (AccountPayments)
                 oPayment.AccountPayments.AccountCode = "221101"; // konto troškova
@@ -853,8 +1090,239 @@ namespace CapgeminiConcur
                     BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
             }
         }
+        */
+        //private CheckBox CheckBox1;
+
+        public void CreatePayDIAPI(ref SAPbobsCOM.Company oCompany, ref SAPbouiCOM.Form oForm, out string sErr, out int iErr)
+        {
+            iErr = 0;
+            sErr = "";
+
+            try
+            {
+                // 🔹 1️⃣ Učitavanje podataka sa forme
+                double sumaAvansa = double.Parse(((EditText)oForm.Items.Item("Item_36").Specific).Value);
+                double sumaTroskova = double.Parse(((EditText)oForm.Items.Item("Item_37").Specific).Value);
+                double razlika = double.Parse(((EditText)oForm.Items.Item("Item_38").Specific).Value);
+                string empCode = ((EditText)oForm.Items.Item("Item_3").Specific).Value;
+                string repId = ((EditText)oForm.Items.Item("Item_1").Specific).Value;  // 🔥 Report ID
+                string valuta = ((EditText)oForm.Items.Item("Item_15").Specific).Value;
+                DateTime datum = DateTime.Now;
+
+                if (Math.Abs(razlika) < 0.01)
+                {
+                    Application.SBO_Application.StatusBar.SetText("Nema razlike za plaćanje.",
+                        BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Warning);
+                    return;
+                }
+
+                // 🔹 2️⃣ Prevod empCode → empID i ime zaposlenog
+                int empID = 0;
+                string empName = "";
+
+                if (!string.IsNullOrEmpty(empCode))
+                {
+                    SAPbobsCOM.Recordset oRec =
+                        (SAPbobsCOM.Recordset)oCompany.GetBusinessObject(SAPbobsCOM.BoObjectTypes.BoRecordset);
+
+                    oRec.DoQuery($@"SELECT ""empID"", ""firstName"" || ' ' || ""lastName"" AS ""FullName""
+                            FROM ""OHEM""
+                            WHERE ""Code"" = '{empCode}'");
+
+                    if (!oRec.EoF)
+                    {
+                        empID = Convert.ToInt32(oRec.Fields.Item("empID").Value);
+                        empName = oRec.Fields.Item("FullName").Value.ToString();
+                    }
+                }
+
+                // 🔹 3️⃣ Određivanje tipa dokumenta
+                bool isIncoming = razlika > 0;
+                string cashAccount = "243000"; // prilagodi banci
+
+                SAPbobsCOM.Payments oPayment = (SAPbobsCOM.Payments)
+                    oCompany.GetBusinessObject(isIncoming
+                        ? SAPbobsCOM.BoObjectTypes.oIncomingPayments
+                        : SAPbobsCOM.BoObjectTypes.oVendorPayments);
+
+                oPayment.DocType = SAPbobsCOM.BoRcptTypes.rAccount;
+                oPayment.DocCurrency = valuta;
+                oPayment.DocDate = datum;
+                oPayment.TaxDate = datum;
+                oPayment.DueDate = datum;
+                oPayment.CashAccount = cashAccount;
+                oPayment.CashSum = Math.Abs(razlika);
+                oPayment.Remarks = isIncoming
+                    ? "Uplata zaposlenog po obračunu troškova (Concur Claim)"
+                    : "Isplata zaposlenom po obračunu troškova (Concur Claim)";
+
+                // 🔹 4️⃣ Dodavanje ReportID u zaglavlje OVPM dokumenta
+                if (!string.IsNullOrEmpty(repId))
+                    oPayment.UserFields.Fields.Item("U_REPORTID").Value = repId;
+
+                // 🔹 5️⃣ Dodavanje reda AccountPayments
+                oPayment.AccountPayments.AccountCode = "221101";
+                oPayment.AccountPayments.SumPaid = Math.Abs(razlika);
+                oPayment.AccountPayments.Decription = "Refundacija troškova zaposlenog";
+
+                if (empID > 0)
+                {
+                    oPayment.AccountPayments.UserFields.Fields.Item("U_EMPLOYEE").Value = empID.ToString();
+                    oPayment.AccountPayments.UserFields.Fields.Item("U_EPLOYEENAME").Value = empName;
+                }
+
+                oPayment.AccountPayments.Add();
+
+                // 🔹 6️⃣ Dodavanje dokumenta
+                int lRetCode = oPayment.Add();
+                if (lRetCode != 0)
+                {
+                    oCompany.GetLastError(out iErr, out sErr);
+                    Application.SBO_Application.StatusBar.SetText($"Greška pri kreiranju plaćanja: {sErr}",
+                        BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
+                }
+                else
+                {
+                    string newDocEntryStr;
+                    oCompany.GetNewObjectCode(out newDocEntryStr);
+
+                    Application.SBO_Application.StatusBar.SetText(
+                        $"{(isIncoming ? "Uplata" : "Isplata")} uspešno kreirana (DocEntry: {newDocEntryStr})",
+                        BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Success);
+
+                    try
+                    {
+                        // Preuzmi novokreirani OVPM (DocEntry → DocNum, Total, Comments)
+                        SAPbobsCOM.Recordset rsPay =
+                            (SAPbobsCOM.Recordset)oCompany.GetBusinessObject(SAPbobsCOM.BoObjectTypes.BoRecordset);
+
+                        rsPay.DoQuery($@"
+            SELECT 
+                ""DocNum"", 
+                ""DocTotal"", 
+                ""Comments"",
+                ""U_REPORTID""
+            FROM ""OVPM""
+            WHERE ""DocEntry"" = {newDocEntryStr}
+        ");
+
+                        if (!rsPay.EoF)
+                        {
+                            string newDocNum = rsPay.Fields.Item("DocNum").Value.ToString();
+                            string newTotal = rsPay.Fields.Item("DocTotal").Value.ToString();
+                            string newComment = rsPay.Fields.Item("Comments").Value.ToString();
+                            string existingRepID = rsPay.Fields.Item("U_REPORTID").Value.ToString().Trim();
+
+                            // 🔥 Uzmemo ReportID iz UDO headera
+                            string repIdUDO = ((EditText)oForm.Items.Item("Item_1").Specific).Value?.Trim();
+
+                            // ============================================================
+                            // 1️⃣ Provera da OP već ima ReportID (koristi se negde drugde)
+                            // ============================================================
+                            if (!string.IsNullOrEmpty(existingRepID) && existingRepID != repIdUDO)
+                            {
+                                Application.SBO_Application.MessageBox(
+                                    $"Avans (OP {newDocNum}) je već korišćen u drugom obračunu!\n" +
+                                    $"ReportID: {existingRepID}"
+                                );
+                                return;
+                            }
+
+                            // ============================================================
+                            // 2️⃣ Upisujemo ReportID u OVPM header — U_REPORTID
+                            // ============================================================
+                            SAPbobsCOM.Payments updPay =
+                                (SAPbobsCOM.Payments)oCompany.GetBusinessObject(
+                                    isIncoming ? SAPbobsCOM.BoObjectTypes.oIncomingPayments
+                                               : SAPbobsCOM.BoObjectTypes.oVendorPayments
+                                );
+
+                            if (updPay.GetByKey(int.Parse(newDocEntryStr)))
+                            {
+                                updPay.UserFields.Fields.Item("U_REPORTID").Value = repIdUDO;
+
+                                int ret = updPay.Update();
+                                if (ret != 0)
+                                {
+                                    oCompany.GetLastError(out int errC, out string errT);
+                                    Application.SBO_Application.StatusBar.SetText(
+                                        "Greška pri upisu ReportID u Payment: " + errT,
+                                        BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
+                                }
+                            }
+
+                            // ============================================================
+                            // 3️⃣ Ubacivanje novog OP u UDO child tabelu avansa
+                            // ============================================================
+                            DBDataSource dsOP = oForm.DataSources.DBDataSources.Item("@BO_CONCUR_CLAIM_OP");
+
+                            int newRow = dsOP.Size;
+                            dsOP.InsertRecord(newRow);
+
+                            dsOP.SetValue("U_BrojDokumenta", newRow, newDocNum);
+                            dsOP.SetValue("U_Opis", newRow, newComment);
+                            dsOP.SetValue("U_Iznos", newRow, newTotal);
+
+                            oMatrixAvansi.LoadFromDataSource();
+                            IzracunajSume();
+                        }
+                    }
+                    catch (Exception exPay)
+                    {
+                        Application.SBO_Application.StatusBar.SetText(
+                            "Greška pri dodavanju dokumenta u Avanse: " + exPay.Message,
+                            BoMessageTime.bmt_Short,
+                            BoStatusBarMessageType.smt_Error);
+                    }
 
 
+                    // ============================================================
+                    // 🔥 4️⃣ Upis nazad u UDO header (PaymentEntry + Zatvoreno)
+                    // ============================================================
+                    try
+                    {
+                        DBDataSource dsHeader = oForm.DataSources.DBDataSources.Item("@BO_CONCUR_CLAIM_H");
 
+                        // Payment Entry
+                        dsHeader.SetValue("U_PaymentEntry", 0, newDocEntryStr);
+
+                        // Zatvaranje
+                        string zatvorenoVal = ComboBox0.Selected == null ? "N" : ComboBox0.Selected.Value;
+                        dsHeader.SetValue("U_Zatvoreno", 0, zatvorenoVal);
+
+                        oForm.Update();
+
+                        if (zatvorenoVal == "Y")
+                        {
+                            Application.SBO_Application.StatusBar.SetText(
+                                "Dokument je automatski zaključen.",
+                                BoMessageTime.bmt_Short,
+                                BoStatusBarMessageType.smt_Warning
+                            );
+
+                            DisableEditing();
+                        }
+                    }
+                    catch (Exception exInner)
+                    {
+                        Application.SBO_Application.StatusBar.SetText(
+                            "Nije upisano PaymentEntry/Zatvoreno u UDO: " + exInner.Message,
+                            BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Warning);
+                    }
+                }
+
+            }
+            catch (Exception ex)
+            {
+                sErr = ex.Message;
+                iErr = -1;
+                Application.SBO_Application.StatusBar.SetText("Greška u CreatePayDIAPI: " + ex.Message,
+                    BoMessageTime.bmt_Short, BoStatusBarMessageType.smt_Error);
+            }
+        }
+
+        private Button Button4;
+        private ComboBox ComboBox0;
+        private StaticText StaticText3;
     }
 }
